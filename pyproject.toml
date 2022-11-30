@@ -1,0 +1,44 @@
+[project]
+name = "fix-future-annotations"
+version = "0.1.0"
+description = "A CLI and pre-commit hook to fix future annotations"
+authors = [
+    {name = "Frost Ming", email = "mianghong@gmail.com"},
+]
+dependencies = [
+    "tokenize-rt>=5.0.0",
+]
+requires-python = ">=3.8"
+readme = "README.md"
+license = {text = "MIT"}
+
+[project.scripts]
+fix-future-annotations = "fix_future_annotations._main:main"
+
+[tool.pdm.dev-dependencies]
+test = [
+    "pytest>=7.2.0",
+]
+
+[build-system]
+requires = ["pdm-pep517>=1.0.0"]
+build-backend = "pdm.pep517.api"
+
+[tool.isort]
+profile = "black"
+atomic = true
+
+[tool.black]
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | tests/samples
+)/
+'''

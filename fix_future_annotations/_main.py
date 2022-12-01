@@ -100,7 +100,12 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("filenames", nargs="+", help="File(s) to fix")
     parser.add_argument(
-        "--write", "-w", action="store_true", help="Write changes to the file"
+        "--check",
+        "-c",
+        dest="write",
+        default=True,
+        action="store_false",
+        help="Only check the files without writing",
     )
     args = parser.parse_args(argv)
     has_diff = False

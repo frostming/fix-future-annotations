@@ -1,0 +1,6 @@
+-   id: fix-future-annotations
+    name: fix-future-annotations
+    description: Upgrade the typing annotations syntax to PEP 585 and PEP 604.
+    entry: fix-future-annotations
+    language: python
+    types: [python]

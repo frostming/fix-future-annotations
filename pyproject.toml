@@ -1,9 +1,8 @@
 [project]
 name = "fix-future-annotations"
-version = "0.1.0"
-description = "A CLI and pre-commit hook to fix future annotations"
+description = "A CLI and pre-commit hook to upgrade the typing annotations syntax to PEP 585 and PEP 604"
 authors = [
-    {name = "Frost Ming", email = "mianghong@gmail.com"},
+    {name = "Frost Ming", email = "me@frostming.com"},
 ]
 dependencies = [
     "tokenize-rt>=5.0.0",
@@ -11,9 +10,17 @@ dependencies = [
 requires-python = ">=3.8"
 readme = "README.md"
 license = {text = "MIT"}
+dynamic = ["version"]
 
 [project.scripts]
 fix-future-annotations = "fix_future_annotations._main:main"
+
+[project.urls]
+Homepage = "https://github.com/frostming/fix-future-annotations"
+Releases = "https://github.com/frostming/fix-future-annotations/releases"
+
+[tool.pdm.version]
+source = "scm"
 
 [tool.pdm.dev-dependencies]
 test = [

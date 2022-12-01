@@ -1,4 +1,6 @@
-from typing import Dict, Optional, Tuple, Union
+from __future__ import absolute_import
+
+from typing import Union, Dict, Optional, Tuple  # this is a comment
 
 MyType = Union[str, int]
 

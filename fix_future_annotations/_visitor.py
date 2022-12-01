@@ -3,13 +3,12 @@ from __future__ import annotations
 import ast
 import contextlib
 import sys
-from collections import defaultdict
 from functools import partial
-from typing import Any, Callable
+from typing import Any, Callable, List
 
 from tokenize_rt import NON_CODING_TOKENS, Offset, Token
 
-from fix_future_annotations.utils import (
+from fix_future_annotations._utils import (
     ast_to_offset,
     find_closing_bracket,
     find_token,
@@ -18,9 +17,11 @@ from fix_future_annotations.utils import (
     replace_name,
 )
 
-BASIC_COLLECTION_TYPES = {"Set", "List", "Tuple", "Dict", "FrozenSet", "Type"}
-IMPORTS_TO_REMOVE = BASIC_COLLECTION_TYPES | {"Optional", "Union"}
-TokenFunc = Callable[[int, list[Token]], None]
+BASIC_COLLECTION_TYPES = frozenset(
+    {"Set", "List", "Tuple", "Dict", "FrozenSet", "Type"}
+)
+IMPORTS_TO_REMOVE = BASIC_COLLECTION_TYPES | frozenset({"Optional", "Union"})
+TokenFunc = Callable[[int, List[Token]], None]
 
 
 def _fix_optional(i: int, tokens: list[Token]) -> None:
@@ -132,16 +133,33 @@ def _fix_union(i: int, tokens: list[Token], *, arg_count: int) -> None:
 class AnnotationVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         super().__init__()
+        self.token_funcs: dict[Offset, list[TokenFunc]] = {}
+
+        self._typing_import_name: str | None = None
         self._has_future_annotations = False
-        self._modified = False
-        self.typing_import_name = "typing"
+        self._using_new_annotations = False
         self._in_annotation_stack: list[bool] = [False]
-        self._typing_imports: dict[str, str] = {}
-        self.token_funcs: dict[Offset, list[TokenFunc]] = defaultdict(list)
+        self._typing_imports_to_remove: dict[str, str] = {}
+        self._conditional_callbacks: list[
+            tuple[Callable[[], bool], Callable[[], None]]
+        ] = []
 
     def add_token_func(self, offset: Offset, func: TokenFunc) -> None:
-        self.token_funcs[offset].append(func)
-        self._modified = True
+        self.token_funcs.setdefault(offset, []).append(func)
+
+    def add_conditional_token_func(
+        self, condition: Callable[[], bool], offset: Offset, func: TokenFunc
+    ) -> None:
+        self._conditional_callbacks.append(
+            (condition, partial(self.add_token_func, offset, func))
+        )
+
+    def get_token_functions(self, tree: ast.Module) -> dict[Offset, list[TokenFunc]]:
+        self.visit(tree)
+        for condition, callback in self._conditional_callbacks:
+            if condition():
+                callback()
+        return self.token_funcs
 
     @property
     def in_annotation(self) -> bool:
@@ -149,7 +167,9 @@ class AnnotationVisitor(ast.NodeVisitor):
 
     @property
     def need_future_annotations(self) -> bool:
-        return not self._has_future_annotations and self._modified
+        return not self._has_future_annotations and (
+            bool(self.token_funcs) or self._using_new_annotations
+        )
 
     @contextlib.contextmanager
     def visit_annotation(self) -> None:
@@ -177,7 +197,7 @@ class AnnotationVisitor(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> Any:
         for alias in node.names:
             if alias.name == "typing":
-                self.typing_import_name = alias.asname or "typing"
+                self._typing_import_name = alias.asname or "typing"
         return self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> Any:
@@ -185,18 +205,22 @@ class AnnotationVisitor(ast.NodeVisitor):
             if any(alias.name == "annotations" for alias in node.names):
                 self._has_future_annotations = True
         elif node.module == "typing":
-            names: list[ast.alias] = []
-            for alias in node.names:
+            names: set[str] = {(alias.asname or alias.name) for alias in node.names}
+            for alias in reversed(node.names):
+                key = alias.asname or alias.name
                 if alias.name in IMPORTS_TO_REMOVE:
-                    self._typing_imports[alias.asname or alias.name] = alias.name
-                    self.add_token_func(
-                        ast_to_offset(alias),
+                    self._typing_imports_to_remove[key] = alias.name
+                    self.add_conditional_token_func(
+                        lambda key=key: key in self._typing_imports_to_remove,
+                        ast_to_offset(alias if hasattr(alias, "lineno") else node),
                         partial(remove_name_from_import, name=alias.name),
                     )
-                else:
-                    names.append(alias)
-            if not names:
-                self.add_token_func(ast_to_offset(node), remove_statement)
+
+            self.add_conditional_token_func(
+                lambda names=names: names <= set(self._typing_imports_to_remove),
+                ast_to_offset(node),
+                remove_statement,
+            )
         else:
             return self.generic_visit(node)
 
@@ -205,7 +229,7 @@ class AnnotationVisitor(ast.NodeVisitor):
         if (
             self.in_annotation
             and isinstance(node.value, ast.Name)
-            and node.value.id == self.typing_import_name
+            and node.value.id == self._typing_import_name
             and node.attr in BASIC_COLLECTION_TYPES
         ):
             self.add_token_func(
@@ -215,26 +239,39 @@ class AnnotationVisitor(ast.NodeVisitor):
         return self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> Any:
-        if self.in_annotation and node.id in (
-            set(self._typing_imports) & BASIC_COLLECTION_TYPES
-        ):
-            self.add_token_func(
-                ast_to_offset(node),
-                partial(
-                    replace_name,
-                    name=node.id,
-                    new=self._typing_imports[node.id].lower(),
-                ),
-            )
-        else:
-            return self.generic_visit(node)
+        if node.id in self._typing_imports_to_remove:
+            name = self._typing_imports_to_remove[node.id]
+            if not self.in_annotation:
+                # It is referred to outside of an annotation, so we need to exclude it
+                self._conditional_callbacks.insert(
+                    0,
+                    (
+                        lambda: True,
+                        lambda key=node.id: self._typing_imports_to_remove.pop(
+                            key, None
+                        ),
+                    ),
+                )
+            elif name in BASIC_COLLECTION_TYPES:
+                self.add_token_func(
+                    ast_to_offset(node),
+                    partial(replace_name, name=node.id, new=name.lower()),
+                )
+
+        return self.generic_visit(node)
+
+    def visit_BinOp(self, node: ast.BinOp) -> Any:
+        if self.in_annotation:
+            self._using_new_annotations = True
+        return self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> Any:
+        if not self.in_annotation:
+            return self.generic_visit(node)
         if isinstance(node.value, ast.Attribute):
             if (
-                self.in_annotation
-                and isinstance(node.value.value, ast.Name)
-                and node.value.value.id == self.typing_import_name
+                isinstance(node.value.value, ast.Name)
+                and node.value.value.id == self._typing_import_name
             ):
                 if node.value.attr == "Optional":
                     self.add_token_func(ast_to_offset(node), _fix_optional)
@@ -246,14 +283,16 @@ class AnnotationVisitor(ast.NodeVisitor):
                             partial(_fix_union, arg_count=arg_count),
                         )
         elif isinstance(node.value, ast.Name):
-            if self.in_annotation and node.value.id in self._typing_imports:
-                if self._typing_imports[node.value.id] == "Optional":
+            if node.value.id in self._typing_imports_to_remove:
+                if self._typing_imports_to_remove[node.value.id] == "Optional":
                     self.add_token_func(ast_to_offset(node), _fix_optional)
-                elif self._typing_imports[node.value.id] == "Union":
+                elif self._typing_imports_to_remove[node.value.id] == "Union":
                     arg_count = _get_arg_count(node.slice)
                     if arg_count > 0:
                         self.add_token_func(
                             ast_to_offset(node),
                             partial(_fix_union, arg_count=arg_count),
                         )
+            elif node.value.id in {name.lower() for name in BASIC_COLLECTION_TYPES}:
+                self._using_new_annotations = True
         return self.generic_visit(node)

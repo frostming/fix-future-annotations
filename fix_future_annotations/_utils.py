@@ -18,8 +18,10 @@ def replace_name(i: int, tokens: list[Token], *, name: str, new: str) -> None:
 
 
 def remove_name_from_import(i: int, tokens: list[Token], *, name: str) -> None:
-    if tokens[i].src != name:
-        return
+    while tokens[i].src != name:
+        i += 1
+        if tokens[i].name == "NEWLINE":
+            return
     j = i + 1
     while j < len(tokens) and tokens[j].name != "NEWLINE":
         if tokens[j].name == "UNIMPORTANT_WS":
@@ -60,7 +62,7 @@ def remove_statement(i: int, tokens: list[Token]) -> None:
     j = i
     while j < len(tokens) and tokens[j].name != "NEWLINE":
         j += 1
-    tokens[i:j] = []
+    tokens[i : j + 1] = []
 
 
 def ast_to_offset(ast: AST) -> Offset:

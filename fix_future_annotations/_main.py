@@ -65,9 +65,10 @@ def _add_future_annotations(content: str) -> str:
     return "".join(lines)
 
 
-def fix_file(file_path: str | Path, write: bool = False) -> bool:
+def fix_file(
+    file_path: str | Path, write: bool = False, show_diff: bool = False
+) -> bool:
     """Fix the file at file_path to use PEP 585, 604 and 563 syntax."""
-    print("Checking file", file_path)
     file_path = Path(file_path)
     file_content = file_path.read_text("utf-8")
     tokens = src_to_tokens(file_content)
@@ -93,10 +94,13 @@ def fix_file(file_path: str | Path, write: bool = False) -> bool:
         )
     )
     if diff:
-        print("File changed:", file_path)
-        print(*diff, sep="\n")
-    if diff and write:
-        file_path.write_text(new_content, "utf-8")
+        if show_diff:
+            print(*diff, sep="\n")
+        if write:
+            print("Fixing file:", file_path)
+            file_path.write_text(new_content, "utf-8")
+        else:
+            print("File needs to be fixed:", file_path)
     return bool(diff)
 
 
@@ -111,16 +115,20 @@ def main(argv: list[str] | None = None) -> None:
         action="store_false",
         help="Only check the files without writing",
     )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Show diff details"
+    )
     args = parser.parse_args(argv)
-    has_diff = False
+    diff_count = 0
     for filename in args.filenames:
         if filename.endswith(".py"):
-            has_diff = has_diff or fix_file(filename, args.write)
-    if has_diff:
+            result = fix_file(filename, args.write, show_diff=args.verbose)
+            diff_count += int(result)
+    if diff_count:
         if args.write:
-            message = "All complete, some files were fixed"
+            message = f"All complete, {diff_count} files were fixed"
         else:
-            message = "All complete, some files need to be fixed"
+            message = f"All complete, {diff_count} files need to be fixed"
         print(message)
         sys.exit(1)
     else:

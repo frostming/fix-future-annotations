@@ -51,7 +51,11 @@ def _add_future_annotations(content: str) -> str:
 
         if in_doc:
             code = line.split("#")[0].rstrip()
-            if code.endswith(doc_quote) and not _escaped(code[: -len(doc_quote)]):
+            if (
+                code != doc_quote
+                and code.endswith(doc_quote)
+                and not _escaped(code[: -len(doc_quote)])
+            ):
                 in_doc = False
     first_code = lines[i].lstrip()
     if not first_code.startswith("from __future__ import") and i == insert_pos:

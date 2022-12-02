@@ -17,6 +17,11 @@ def replace_name(i: int, tokens: list[Token], *, name: str, new: str) -> None:
     tokens[i : j + 1] = [new_token]
 
 
+def replace_string(i: int, tokens: list[Token], *, new: str) -> None:
+    new_token = tokens[i]._replace(name="CODE", src=new)
+    tokens[i] = new_token
+
+
 def remove_name_from_import(i: int, tokens: list[Token], *, name: str) -> None:
     while tokens[i].src != name:
         i += 1

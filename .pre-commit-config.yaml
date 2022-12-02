@@ -1,5 +1,6 @@
 repos:
   - repo: https://github.com/frostming/fix-future-annotations
-    rev: 0.1.0
+    rev: 0.2.0
     hooks:
       - id: fix-future-annotations
+        exclude: tests/samples/

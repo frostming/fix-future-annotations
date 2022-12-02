@@ -50,6 +50,26 @@ str | None
 </td></tr></tbody>
 </table>
 
+### [PEP 563] – Postponed Evaluation of Annotations
+
+<table>
+<thead>
+<tr><th>Old</th><th>New</th></tr>
+</thead>
+<tbody>
+<tr><td>
+
+```python
+def create() -> "Foo": pass
+```
+</td><td>
+
+```python
+def create() -> Foo: pass
+```
+</td></tr></tbody>
+</table>
+
 ### Import aliases handling
 
 <table>
@@ -91,7 +111,8 @@ def foo() -> tuple[str, int | None]:
 ```python
 from typing import Union, Dict, Optional, Tuple
 
-MyType = Union[str, int]  # non-annotation usage will be preserved
+# non-annotation usage will be preserved
+MyType = Union[str, int]
 
 
 def foo() -> Tuple[Dict[str, int], Optional[str]]:
@@ -104,7 +125,8 @@ from __future__ import annotations
 
 from typing import Union
 
-MyType = Union[str, int]  # non-annotation usage will be preserved
+# non-annotation usage will be preserved
+MyType = Union[str, int]
 
 
 def foo() -> tuple[dict[str, int], str | None]:
@@ -139,5 +161,6 @@ fix-future-annotations my_script.py
 
 This work is distributed under [MIT](https://github.com/frostming/fix-future-annotations/blob/main/README.md) license.
 
+[PEP 563]: https://peps.python.org/pep-0563/
 [PEP 585]: https://peps.python.org/pep-0585/
 [PEP 604]: https://peps.python.org/pep-0604/

@@ -4,7 +4,7 @@ import ast
 import contextlib
 import sys
 from functools import partial
-from typing import Any, Callable, List
+from typing import Any, Callable, List, NamedTuple
 
 from tokenize_rt import NON_CODING_TOKENS, Offset, Token
 
@@ -15,6 +15,7 @@ from fix_future_annotations._utils import (
     remove_name_from_import,
     remove_statement,
     replace_name,
+    replace_string,
 )
 
 BASIC_COLLECTION_TYPES = frozenset(
@@ -130,16 +131,23 @@ def _fix_union(i: int, tokens: list[Token], *, arg_count: int) -> None:
         del tokens[i:j]
 
 
+class State(NamedTuple):
+    in_annotation: bool
+    in_literal: bool
+
+
 class AnnotationVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         super().__init__()
         self.token_funcs: dict[Offset, list[TokenFunc]] = {}
 
         self._typing_import_name: str | None = None
+        self._typing_extensions_import_name: str | None = None
         self._has_future_annotations = False
         self._using_new_annotations = False
-        self._in_annotation_stack: list[bool] = [False]
+        self._state_stack: list[State] = []
         self._typing_imports_to_remove: dict[str, str] = {}
+        self._literal_import_name: str | None = None
         self._conditional_callbacks: list[
             tuple[Callable[[], bool], Callable[[], None]]
         ] = []
@@ -155,15 +163,16 @@ class AnnotationVisitor(ast.NodeVisitor):
         )
 
     def get_token_functions(self, tree: ast.Module) -> dict[Offset, list[TokenFunc]]:
-        self.visit(tree)
+        with self.under_state(State(False, False)):
+            self.visit(tree)
         for condition, callback in self._conditional_callbacks:
             if condition():
                 callback()
         return self.token_funcs
 
     @property
-    def in_annotation(self) -> bool:
-        return self._in_annotation_stack[-1]
+    def state(self) -> State:
+        return self._state_stack[-1]
 
     @property
     def need_future_annotations(self) -> bool:
@@ -172,18 +181,18 @@ class AnnotationVisitor(ast.NodeVisitor):
         )
 
     @contextlib.contextmanager
-    def visit_annotation(self) -> None:
-        self._in_annotation_stack.append(True)
+    def under_state(self, state: State) -> None:
+        self._state_stack.append(state)
         try:
             yield
         finally:
-            self._in_annotation_stack.pop()
+            self._state_stack.pop()
 
     def generic_visit(self, node: ast.AST) -> Any:
         for field in reversed(node._fields):
             value = getattr(node, field)
             if field in {"annotation", "returns"}:
-                ctx = self.visit_annotation()
+                ctx = self.under_state(self.state._replace(in_annotation=True))
             else:
                 ctx = contextlib.nullcontext()
             with ctx:
@@ -197,7 +206,9 @@ class AnnotationVisitor(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> Any:
         for alias in node.names:
             if alias.name == "typing":
-                self._typing_import_name = alias.asname or "typing"
+                self._typing_import_name = alias.asname or alias.name
+            elif alias.name == "typing_extensions":
+                self._typing_extensions_import_name = alias.asname or alias.name
         return self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> Any:
@@ -208,6 +219,8 @@ class AnnotationVisitor(ast.NodeVisitor):
             names: set[str] = {(alias.asname or alias.name) for alias in node.names}
             for alias in reversed(node.names):
                 key = alias.asname or alias.name
+                if alias.name == "Literal":
+                    self._literal_import_name = key
                 if alias.name in IMPORTS_TO_REMOVE:
                     self._typing_imports_to_remove[key] = alias.name
                     self.add_conditional_token_func(
@@ -221,13 +234,17 @@ class AnnotationVisitor(ast.NodeVisitor):
                 ast_to_offset(node),
                 remove_statement,
             )
+        elif node.module == "typing_extensions":
+            alias = next((a for a in node.names if a.name == "Literal"), None)
+            if alias is not None:
+                self._literal_import_name = alias.asname or alias.name
         else:
             return self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         """Transform typing.List -> list"""
         if (
-            self.in_annotation
+            self.state.in_annotation
             and isinstance(node.value, ast.Name)
             and node.value.id == self._typing_import_name
             and node.attr in BASIC_COLLECTION_TYPES
@@ -241,7 +258,7 @@ class AnnotationVisitor(ast.NodeVisitor):
     def visit_Name(self, node: ast.Name) -> Any:
         if node.id in self._typing_imports_to_remove:
             name = self._typing_imports_to_remove[node.id]
-            if not self.in_annotation:
+            if not self.state.in_annotation:
                 # It is referred to outside of an annotation, so we need to exclude it
                 self._conditional_callbacks.insert(
                     0,
@@ -261,12 +278,12 @@ class AnnotationVisitor(ast.NodeVisitor):
         return self.generic_visit(node)
 
     def visit_BinOp(self, node: ast.BinOp) -> Any:
-        if self.in_annotation:
+        if self.state.in_annotation:
             self._using_new_annotations = True
         return self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> Any:
-        if not self.in_annotation:
+        if not self.state.in_annotation:
             return self.generic_visit(node)
         if isinstance(node.value, ast.Attribute):
             if (
@@ -282,6 +299,14 @@ class AnnotationVisitor(ast.NodeVisitor):
                             ast_to_offset(node),
                             partial(_fix_union, arg_count=arg_count),
                         )
+            elif (
+                isinstance(node.value.value, ast.Name)
+                and node.value.value.id
+                in {self._typing_import_name, self._typing_extensions_import_name}
+                and node.value.attr == "Literal"
+            ):
+                with self.under_state(self.state._replace(in_literal=True)):
+                    return self.generic_visit(node)
         elif isinstance(node.value, ast.Name):
             if node.value.id in self._typing_imports_to_remove:
                 if self._typing_imports_to_remove[node.value.id] == "Optional":
@@ -295,4 +320,18 @@ class AnnotationVisitor(ast.NodeVisitor):
                         )
             elif node.value.id in {name.lower() for name in BASIC_COLLECTION_TYPES}:
                 self._using_new_annotations = True
+            elif node.value.id == self._literal_import_name:
+                with self.under_state(self.state._replace(in_literal=True)):
+                    return self.generic_visit(node)
+        return self.generic_visit(node)
+
+    def visit_Constant(self, node: ast.Constant) -> Any:
+        if (
+            self.state.in_annotation
+            and not self.state.in_literal
+            and isinstance(node.value, str)
+        ):
+            self.add_token_func(
+                ast_to_offset(node), partial(replace_string, new=node.value)
+            )
         return self.generic_visit(node)

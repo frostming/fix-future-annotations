@@ -40,7 +40,6 @@ jobs:
           python -m pip install dist/*.whl
           fix-future-annotations tests/samples/from_import.py || true
 
-      # - name: Upload to Pypi
-      #   run: |
-      #     pip install twine
-      #     twine upload --username __token__ --password ${{ secrets.PYPI_TOKEN }} dist/*
+      - name: Upload to Pypi
+        run: |
+          twine upload --username __token__ --password ${{ secrets.PYPI_TOKEN }} dist/*

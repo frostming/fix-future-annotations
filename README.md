@@ -152,7 +152,7 @@ repos:
 ## Use as command line tool
 
 ```bash
-python3 -m pip install git+https://github.com/frostming/fix-future-annotations.git
+python3 -m pip install -U fix-future-annotations
 
 fix-future-annotations my_script.py
 ```

@@ -136,7 +136,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
     diff_count = 0
+    checked = 0
     for filename in _iter_files(*args.path):
+        checked += 1
         result = fix_file(filename, args.write, show_diff=args.verbose)
         diff_count += int(result)
     if diff_count:
@@ -144,7 +146,8 @@ def main(argv: list[str] | None = None) -> None:
             message = f"All complete, {diff_count} files were fixed"
         else:
             message = f"All complete, {diff_count} files need to be fixed"
-        print(message)
+        if checked > 1:  # multiple mode, print a summary
+            print(message)
         sys.exit(1)
-    else:
+    elif checked > 1:
         print("All complete, no file is changed")

@@ -6,6 +6,7 @@ authors = [
 ]
 dependencies = [
     "tokenize-rt>=5.0.0",
+    "tomli; python_version < '3.11'",
 ]
 requires-python = ">=3.8"
 readme = "README.md"
@@ -49,3 +50,10 @@ exclude = '''
   | tests/samples
 )/
 '''
+
+
+[tool.fix_future_annotations]
+exclude_lines = [
+    "# ffa: ignore",
+    "class NoFix:"
+]

@@ -10,6 +10,7 @@ from typing import Iterator
 
 from tokenize_rt import reversed_enumerate, src_to_tokens, tokens_to_src
 
+from fix_future_annotations._config import Config
 from fix_future_annotations._visitor import AnnotationVisitor
 
 
@@ -17,17 +18,19 @@ def _escaped(line: str) -> bool:
     return (len(line) - len(line.rstrip("\\"))) % 2 == 1
 
 
-def _iter_files(*paths: str) -> Iterator[str]:
+def _iter_files(*paths: str, config: Config) -> Iterator[str]:
     def files_under_dir(path: str) -> Iterator[str]:
         for root, _, files in os.walk(path):
             for filename in files:
                 if filename.endswith(".py"):
-                    yield os.path.join(root, filename)
+                    fn = os.path.join(root, filename).replace("\\", "/")
+                    if not config.is_file_excluded(fn):
+                        yield fn
 
     for path in paths:
         if os.path.isdir(path):
             yield from files_under_dir(path)
-        elif path.endswith(".py"):
+        elif path.endswith(".py") and not config.is_file_excluded(path):
             yield path
 
 
@@ -82,14 +85,20 @@ def _add_future_annotations(content: str) -> str:
 
 
 def fix_file(
-    file_path: str | Path, write: bool = False, show_diff: bool = False
+    file_path: str | Path,
+    *,
+    write: bool = False,
+    show_diff: bool = False,
+    config: Config | None = None,
 ) -> bool:
     """Fix the file at file_path to use PEP 585, 604 and 563 syntax."""
+    if config is None:
+        config = Config.from_file()
     file_path = Path(file_path)
     file_content = file_path.read_text("utf-8")
     tokens = src_to_tokens(file_content)
     tree = ast.parse(file_content)
-    visitor = AnnotationVisitor()
+    visitor = AnnotationVisitor(file_content.splitlines(), config=config)
     token_funcs = visitor.get_token_functions(tree)
     for i, token in reversed_enumerate(tokens):
         if not token.src:
@@ -137,9 +146,12 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     diff_count = 0
     checked = 0
-    for filename in _iter_files(*args.path):
+    config = Config.from_file()
+    for filename in _iter_files(*args.path, config=config):
         checked += 1
-        result = fix_file(filename, args.write, show_diff=args.verbose)
+        result = fix_file(
+            filename, write=args.write, show_diff=args.verbose, config=config
+        )
         diff_count += int(result)
     if diff_count:
         if args.write:

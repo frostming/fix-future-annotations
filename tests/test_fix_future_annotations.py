@@ -19,9 +19,9 @@ def _load_samples() -> list:
 @pytest.mark.parametrize("origin, fixed", _load_samples())
 def test_fix_samples(origin: Path, fixed: Path, tmp_path: Path) -> None:
     copied = shutil.copy2(origin, tmp_path)
-    result = fix_file(copied, True)
+    result = fix_file(copied, write=True)
 
     assert fixed.read_text() == Path(copied).read_text()
 
-    result = fix_file(copied, False)
+    result = fix_file(copied, write=False)
     assert not result

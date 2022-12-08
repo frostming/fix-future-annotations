@@ -70,8 +70,8 @@ requires_python = ">=3.7"
 summary = "A lil' TOML parser"
 
 [metadata]
-lock_version = "4.0"
-content_hash = "sha256:13ed22f7e12e7c7c3ee7cdeb18d0a3764932cac684d130d177be14ad0546d577"
+lock_version = "4.1"
+content_hash = "sha256:b50b8c49b0bcf0f0b3c1d684310b54ec461bdd90ce8804ff7e57f17092d2e57b"
 
 [metadata.files]
 "attrs 22.1.0" = [

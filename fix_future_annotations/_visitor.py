@@ -8,6 +8,7 @@ from typing import Any, Callable, List, NamedTuple
 
 from tokenize_rt import NON_CODING_TOKENS, Offset, Token
 
+from fix_future_annotations._config import Config
 from fix_future_annotations._utils import (
     ast_to_offset,
     find_closing_bracket,
@@ -134,11 +135,17 @@ def _fix_union(i: int, tokens: list[Token], *, arg_count: int) -> None:
 class State(NamedTuple):
     in_annotation: bool
     in_literal: bool
+    omit: bool
+
+    def update_annotation(self) -> bool:
+        return self.in_annotation and not self.omit
 
 
 class AnnotationVisitor(ast.NodeVisitor):
-    def __init__(self) -> None:
+    def __init__(self, lines: list[str], *, config: Config) -> None:
         super().__init__()
+        self.lines = lines
+        self.config = config
         self.token_funcs: dict[Offset, list[TokenFunc]] = {}
 
         self._typing_import_name: str | None = None
@@ -162,8 +169,12 @@ class AnnotationVisitor(ast.NodeVisitor):
             (condition, partial(self.add_token_func, offset, func))
         )
 
+    def _is_excluded(self, node: ast.AST) -> bool:
+        line = self.lines[node.lineno - 1]
+        return self.config.is_line_excluded(line)
+
     def get_token_functions(self, tree: ast.Module) -> dict[Offset, list[TokenFunc]]:
-        with self.under_state(State(False, False)):
+        with self.under_state(State(False, False, False)):
             self.visit(tree)
         for condition, callback in self._conditional_callbacks:
             if condition():
@@ -187,6 +198,14 @@ class AnnotationVisitor(ast.NodeVisitor):
             yield
         finally:
             self._state_stack.pop()
+
+    def visit(self, node: ast.AST) -> Any:
+        if isinstance(node, ast.stmt) and self._is_excluded(node):
+            ctx = self.under_state(self.state._replace(omit=True))
+        else:
+            ctx = contextlib.nullcontext()
+        with ctx:
+            return super().visit(node)
 
     def generic_visit(self, node: ast.AST) -> Any:
         for field in reversed(node._fields):
@@ -244,7 +263,7 @@ class AnnotationVisitor(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         """Transform typing.List -> list"""
         if (
-            self.state.in_annotation
+            self.state.update_annotation()
             and isinstance(node.value, ast.Name)
             and node.value.id == self._typing_import_name
             and node.attr in BASIC_COLLECTION_TYPES
@@ -258,7 +277,7 @@ class AnnotationVisitor(ast.NodeVisitor):
     def visit_Name(self, node: ast.Name) -> Any:
         if node.id in self._typing_imports_to_remove:
             name = self._typing_imports_to_remove[node.id]
-            if not self.state.in_annotation:
+            if not self.state.update_annotation():
                 # It is referred to outside of an annotation, so we need to exclude it
                 self._conditional_callbacks.insert(
                     0,
@@ -283,7 +302,7 @@ class AnnotationVisitor(ast.NodeVisitor):
         return self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> Any:
-        if not self.state.in_annotation:
+        if not self.state.update_annotation():
             return self.generic_visit(node)
         if isinstance(node.value, ast.Attribute):
             if (
@@ -327,7 +346,7 @@ class AnnotationVisitor(ast.NodeVisitor):
 
     def visit_Constant(self, node: ast.Constant) -> Any:
         if (
-            self.state.in_annotation
+            self.state.update_annotation()
             and not self.state.in_literal
             and isinstance(node.value, str)
         ):

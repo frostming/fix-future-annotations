@@ -137,6 +137,14 @@ def foo() -> tuple[dict[str, int], str | None]:
 
 Unused import names will be removed, and if `from __future__ import annotations` is not found in the script, it will be automatically added if the new syntax is being used.
 
+## Use as a command line tool
+
+```bash
+python3 -m pip install -U fix-future-annotations
+
+fix-future-annotations my_script.py
+```
+
 ## Use as pre-commit hook
 
 Add the following to your `.pre-commit-config.yaml`:
@@ -149,12 +157,21 @@ repos:
       - id: fix-future-annotations
 ```
 
-## Use as command line tool
+## Configurations
 
-```bash
-python3 -m pip install -U fix-future-annotations
+`fix-future-annotations` can be configured via `pyproject.toml`. Here is an example:
 
-fix-future-annotations my_script.py
+```toml
+[tool.fix_future_annotations]
+exclude_files = [  # regex patterns to exclude files
+    'tests/.*',
+    'docs/.*',
+]
+
+exclude_lines = [  # regex patterns to exclude lines
+    '# ffa: ignore',   # if a line ends with this comment, the whole *block* will be excluded
+    'class .+\(BaseModel\):'  # classes that inherit from `BaseModel` will be excluded
+]
 ```
 
 ## License

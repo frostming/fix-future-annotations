@@ -54,6 +54,5 @@ exclude = '''
 
 [tool.fix_future_annotations]
 exclude_lines = [
-    "# ffa: ignore",
-    "class NoFix:"
+    "# ffa: ignore"
 ]

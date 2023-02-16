@@ -152,7 +152,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/frostming/fix-future-annotations
-    rev: x.y.z  # a released version tag
+    rev: 0.5.0  # a released version tag
     hooks:
       - id: fix-future-annotations
 ```
